@@ -46,4 +46,43 @@ seeded from a sha256 of the prompt. Cats are consistent. Science.
 
 ## Roadmap
 
-v2 will load a real trained meow model.
+~~v2 will load a real trained meow model.~~ **Done — see below.**
+
+## v2: A Real (Tiny) Trained Meow Model
+
+The server now ships with an actual neural network: a from-scratch GPT-2
+(2 layers, 2 heads, 64-dim embeddings, 32 positions, ~104k parameters,
+26-token word-level vocabulary) trained on 20k deterministic meow sentences.
+It is a real trained model. It is also deeply silly.
+
+**Train it yourself** (deterministic, CPU, ~1 minute):
+
+```bash
+/opt/homebrew/bin/uv run python train.py
+```
+
+This generates the fixed-seed corpus, trains, and saves the checkpoint to
+`models/meow-lite/` (`model.safetensors`, `config.json`, `vocab.json`, ...).
+The checkpoint is committed to this repo — no training required to run the
+server. Pre-trained weights are also published at
+[huggingface.co/tampajohn/meow-lite](https://huggingface.co/tampajohn/meow-lite).
+
+**How the server loads it**: on the first request, `meow_lite.server` checks
+`MEOW_LITE_MODEL_PATH` (default `models/meow-lite` relative to the repo root).
+If the directory exists and loads, generation runs through the model with
+sha256(prompt)-seeded sampling (temperature 1.0, max 16 tokens, stops at EOS),
+so the same prompt still yields the same meows. If the checkpoint is missing
+or fails to load, the server silently falls back to the v1 rule-based
+`MeowGenerator`. All endpoints and response shapes are unchanged.
+
+```bash
+# point at a custom checkpoint
+MEOW_LITE_MODEL_PATH=/somewhere/else/meow-lite /opt/homebrew/bin/uv run uvicorn meow_lite.server:app --port 8011
+```
+
+Run the tests (tokenizer roundtrip, logit shapes, checkpoint generation,
+server behavior, determinism with the model active):
+
+```bash
+/opt/homebrew/bin/uv run pytest -v
+```

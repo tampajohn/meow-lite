@@ -8,12 +8,39 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from meow_lite import neural
 from meow_lite.meow import MeowGenerator
 
 MODEL_ID = "meow-lite"
 
 app = FastAPI(title="meow-lite", version="1.0.0")
 _generator = MeowGenerator()
+_engine: Optional[dict] = None
+_engine_checked = False
+
+
+def reset_engine() -> None:
+    """Forget any loaded model so the next request re-reads MEOW_LITE_MODEL_PATH."""
+    global _engine, _engine_checked
+    _engine = None
+    _engine_checked = False
+
+
+def _get_engine() -> Optional[dict]:
+    global _engine, _engine_checked
+    if not _engine_checked:
+        _engine_checked = True
+        _engine = neural.try_load()
+    return _engine
+
+
+def _generate(prompt: str) -> str:
+    engine = _get_engine()
+    if engine is not None:
+        text = neural.seeded_generate(prompt, engine)
+        if text:
+            return text
+    return _generator.generate(prompt)
 
 
 class ChatMessage(BaseModel):
@@ -91,7 +118,7 @@ def list_models() -> dict[str, Any]:
 @app.post("/v1/chat/completions")
 def chat_completions(request: ChatCompletionRequest) -> Any:
     prompt = _last_user_text(request.messages)
-    text = _generator.generate(prompt)
+    text = _generate(prompt)
     prompt_tokens, completion_tokens, total_tokens = _token_counts(text, prompt)
 
     if request.stream:
@@ -167,7 +194,7 @@ def chat_completions(request: ChatCompletionRequest) -> Any:
 @app.post("/v1/messages")
 def anthropic_messages(request: AnthropicMessagesRequest) -> Any:
     prompt = _last_user_text(request.messages)
-    text = _generator.generate(prompt)
+    text = _generate(prompt)
     _, output_tokens, _ = _token_counts(text, prompt)
 
     if request.stream:

@@ -16,7 +16,7 @@ VOCABULARY = [
     "nyan",
 ]
 
-_TERMINALS = [".", "!", "?"]
+TERMINALS = [".", "!", "?"]
 
 
 class MeowGenerator:
@@ -29,4 +29,4 @@ class MeowGenerator:
         words = [rng.choice(VOCABULARY) for _ in range(count)]
         sentence = " ".join(words)
         sentence = sentence[0].upper() + sentence[1:]
-        return sentence + rng.choice(_TERMINALS)
+        return sentence + rng.choice(TERMINALS)
