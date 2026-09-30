@@ -24,3 +24,9 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Generated datasets (v6 synthesis) — large, regenerable
+data/v6/
+
+# Agent tooling state
+.chug/
