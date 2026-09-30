@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from meow_lite import server
 from meow_lite.behavior import apply_triggers, weave
 from meow_lite.neural import DEFAULT_MODEL_PATH as MODEL_DIR
-from meow_lite.tokenizer import MeowTokenizer
+from meow_lite.tokenizer import ACTION_TOKENS, MeowTokenizer
 
 
 def test_each_trigger_fires_on_matching_prompt():
@@ -29,14 +29,17 @@ def test_neutral_prompt_has_no_triggers():
 
 def test_action_tokens_are_single_tokens():
     tokenizer = MeowTokenizer()
-    ids = tokenizer.encode("<bite> meow")
-    # [BOS, <bite>, meow] — <bite> must be exactly one token
-    assert len(ids) == 3
-    assert tokenizer.convert_ids_to_tokens(ids[1]) == "<bite>"
-    assert tokenizer.decode(ids, skip_special_tokens=True) == "<bite> meow"
+    for token in ACTION_TOKENS:
+        ids = tokenizer.encode(token + " meow")
+        # [BOS, token, meow] — every action token must be exactly ONE token
+        assert len(ids) == 3, f"{token} must be one token, got {ids}"
+        assert tokenizer.convert_ids_to_tokens(ids[1]) == token
+        assert tokenizer.decode(ids, skip_special_tokens=True) == token + " meow"
+        solo_ids = tokenizer.encode(token, add_special_tokens=False)
+        assert len(solo_ids) == 1, f"{token} must be one token, got {solo_ids}"
     # longest-match: <scratch_couch> not split into <scratch>-prefixed pieces
     scratch_ids = tokenizer.encode("<scratch_couch>", add_special_tokens=False)
-    assert len(scratch_ids) == 1
+    assert scratch_ids == [tokenizer.convert_tokens_to_ids("<scratch_couch>")]
 
 
 def test_weave_ordering():

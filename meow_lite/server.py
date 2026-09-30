@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from meow_lite import neural
-from meow_lite.behavior import apply_triggers, weave
+from meow_lite.behavior import apply_triggers, is_reward, weave
 from meow_lite.meow import MeowGenerator
 
 MODEL_ID = "meow-lite"
@@ -35,18 +35,23 @@ def _get_engine() -> Optional[dict]:
     return _engine
 
 
-def _generate(prompt: str) -> str:
+def _generate(prompt: str, warm: bool = False) -> str:
     engine = _get_engine()
     if engine is not None:
-        text = neural.seeded_generate(prompt, engine)
+        text = neural.seeded_generate(prompt, engine, warm=warm)
         if text:
             return text
-    return _generator.generate(prompt)
+    return _generator.generate(prompt, warm=warm)
 
 
 def _compose(prompt: str) -> str:
-    """Generated meows with forced misbehavior tokens woven in front."""
-    text = weave(apply_triggers(prompt), _generate(prompt))
+    """Generated meows with forced behavior tokens woven in front.
+
+    Praise prompts (``is_reward``) also warm the meow mix — identically for
+    the neural engine (logit bias) and the v1 fallback (weighted sampling).
+    """
+    warm = is_reward(prompt)
+    text = weave(apply_triggers(prompt), _generate(prompt, warm=warm))
     # Preserve the v1 contract: output starts with a capital letter.
     if text and text[0].isalpha() and text[0].islower():
         text = text[0].upper() + text[1:]

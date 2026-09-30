@@ -31,6 +31,8 @@ ACTION_TOKENS = [
     "<zoomies>",
     "<hairball>",
     "<stare>",
+    "<purr>",
+    "<pounce>",
 ]
 _ACTION_SET = set(ACTION_TOKENS)
 # Longest-first alternation so overlapping tokens (<scratch> vs
