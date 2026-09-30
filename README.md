@@ -90,3 +90,38 @@ server behavior, determinism with the model active):
 ```bash
 /opt/homebrew/bin/uv run pytest -v
 ```
+
+## v3: Felinely Complete
+
+v2 could only meow. v3 fixes that. The vocabulary now includes 8 misbehavior
+action tokens (each exactly one model token, vocab size 34), the corpus was
+extended with 8k misbehavior sentences, and the model was retrained.
+
+| Token | Meaning |
+|---|---|
+| `<bite>` | you touched the belly 0.05s too long |
+| `<scratch>` | generic scratching (furniture not specified) |
+| `<scratch_couch>` | the couch, specifically |
+| `<knock_glass>` | it was on the table; now it is on the floor |
+| `<hiss>` | the vet, or a vacuum, or betrayal |
+| `<zoomies>` | it is 3am. run. |
+| `<hairball>` | a gift, deposited |
+| `<stare>` | unmoving. judging. |
+
+**Deterministic prompt triggers** (applied above the engine — identical
+behavior for the neural model and the v1 fallback; same prompt always yields
+the same triggers and the same meows):
+
+| Prompt contains | Forced token |
+|---|---|
+| `belly` | `<bite>` |
+| `couch` or `sofa` | `<scratch_couch>` |
+| `glass` or `table` | `<knock_glass>` |
+| `3am`, `midnight`, or `night` | `<zoomies>` |
+| `vet` | `<hiss>` |
+
+Forced tokens are woven in front of the meows (and emitted as leading
+streaming chunks), e.g. *"can I pet your belly?"* →
+`<bite> Mewmew mrow prrrt mraow mewmew!`.
+
+*feature request: a reviewer who touched the belly 0.05s too long*

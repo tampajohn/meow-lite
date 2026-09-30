@@ -8,6 +8,7 @@ model checkpoint so ``GPT2LMHeadModel.from_pretrained`` +
 
 import json
 import os
+import re
 
 from transformers import PreTrainedTokenizer
 
@@ -19,6 +20,27 @@ PAD_TOKEN = "<pad>"
 
 SPECIAL_TOKENS = [BOS_TOKEN, EOS_TOKEN, PAD_TOKEN]
 
+# Felinely-complete misbehavior actions — each must survive tokenization
+# as exactly ONE token.
+ACTION_TOKENS = [
+    "<bite>",
+    "<scratch>",
+    "<scratch_couch>",
+    "<knock_glass>",
+    "<hiss>",
+    "<zoomies>",
+    "<hairball>",
+    "<stare>",
+]
+_ACTION_SET = set(ACTION_TOKENS)
+# Longest-first alternation so overlapping tokens (<scratch> vs
+# <scratch_couch>) match greedily.
+ACTION_PATTERN = re.compile(
+    "("
+    + "|".join(re.escape(token) for token in sorted(ACTION_TOKENS, key=len, reverse=True))
+    + ")"
+)
+
 
 def build_vocab() -> dict[str, int]:
     tokens: list[str] = []
@@ -26,6 +48,7 @@ def build_vocab() -> dict[str, int]:
         tokens.append(word.lower())
         tokens.append(word.capitalize())
     tokens.extend(TERMINALS)
+    tokens.extend(ACTION_TOKENS)
     tokens.extend(SPECIAL_TOKENS)
     return {token: index for index, token in enumerate(tokens)}
 
@@ -57,14 +80,20 @@ class MeowTokenizer(PreTrainedTokenizer):
 
     def _tokenize(self, text, **kwargs):
         tokens = []
-        for raw in text.split():
-            puncts = []
-            while raw and raw[-1] in TERMINALS:
-                puncts.append(raw[-1])
-                raw = raw[:-1]
-            if raw:
-                tokens.append(raw)
-            tokens.extend(puncts)
+        for part in ACTION_PATTERN.split(text):
+            if not part:
+                continue
+            if part in _ACTION_SET:
+                tokens.append(part)
+                continue
+            for raw in part.split():
+                puncts = []
+                while raw and raw[-1] in TERMINALS:
+                    puncts.append(raw[-1])
+                    raw = raw[:-1]
+                if raw:
+                    tokens.append(raw)
+                tokens.extend(puncts)
         return tokens
 
     def _convert_token_to_id(self, token):

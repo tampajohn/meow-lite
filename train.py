@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """Train the tiny meow GPT-2 from scratch and save it to models/meow-lite/.
 
-Deterministic and CPU-friendly (~1 minute): fixed-seed corpus of 20k meow
-sentences, word-level vocab (~26 tokens), 2-layer/2-head/64-dim GPT-2.
+Deterministic and CPU-friendly (~1-2 minutes): fixed-seed corpus of 20k meow
+sentences plus 8k misbehavior sentences (action tokens mixed with meow words),
+word-level vocab (34 tokens), 2-layer/2-head/64-dim GPT-2.
 
 Usage: /opt/homebrew/bin/uv run python train.py
 """
@@ -16,10 +17,11 @@ from transformers import GPT2Config, GPT2LMHeadModel
 
 from meow_lite.meow import TERMINALS, VOCABULARY
 from meow_lite.neural import DEFAULT_MODEL_PATH
-from meow_lite.tokenizer import MeowTokenizer
+from meow_lite.tokenizer import ACTION_TOKENS, MeowTokenizer
 
 SEED = 20260930
 CORPUS_SIZE = 20000
+MISBEHAVIOR_SIZE = 8000
 BATCH_SIZE = 64
 EPOCHS = 3
 LEARNING_RATE = 1e-3
@@ -47,11 +49,30 @@ def make_corpus(count: int, rng: random.Random) -> list[str]:
     return sentences
 
 
+def make_misbehavior(count: int, rng: random.Random) -> list[str]:
+    """Meow sentences with 1-3 action tokens mixed in, e.g.
+    '<zoomies> mrrp mraow <knock_glass> !' or 'Mew <hiss> mrrrow .'."""
+    sentences = []
+    for _ in range(count):
+        word_count = rng.randint(3, 12)
+        words = [rng.choice(VOCABULARY) for _ in range(word_count)]
+        for _ in range(rng.randint(1, 3)):
+            words.insert(rng.randint(0, len(words)), rng.choice(ACTION_TOKENS))
+        sentence = " ".join(words)
+        sentence = sentence[0].upper() + sentence[1:] + rng.choice(TERMINALS)
+        sentences.append(sentence)
+    return sentences
+
+
 def main() -> None:
     set_seeds(SEED)
     corpus_rng = random.Random(SEED)
-    corpus = make_corpus(CORPUS_SIZE, corpus_rng)
+    misbehavior_rng = random.Random(SEED + 1)
+    corpus = make_corpus(CORPUS_SIZE, corpus_rng) + make_misbehavior(
+        MISBEHAVIOR_SIZE, misbehavior_rng
+    )
     print(f"corpus: {len(corpus)} sentences, e.g. {corpus[0]!r}")
+    print(f"misbehavior example: {corpus[-1]!r}")
 
     tokenizer = MeowTokenizer()
     print(f"vocab: {tokenizer.vocab_size} tokens")
@@ -116,10 +137,11 @@ def main() -> None:
     print(f"saved checkpoint to {OUTPUT_DIR}")
 
     engine = {"model": model, "tokenizer": tokenizer}
+    from meow_lite.behavior import apply_triggers, weave
     from meow_lite.neural import seeded_generate
 
-    for prompt in ("Explain gravity", "What is the meaning of life?"):
-        print(f"sample {prompt!r} -> {seeded_generate(prompt, engine)!r}")
+    for prompt in ("Explain gravity", "can I pet your belly?", "it is 3am, what now?"):
+        print(f"sample {prompt!r} -> {weave(apply_triggers(prompt), seeded_generate(prompt, engine))!r}")
 
 
 if __name__ == "__main__":

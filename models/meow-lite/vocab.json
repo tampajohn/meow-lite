@@ -22,7 +22,15 @@
   ".": 20,
   "!": 21,
   "?": 22,
-  "<bos>": 23,
-  "<eos>": 24,
-  "<pad>": 25
+  "<bite>": 23,
+  "<scratch>": 24,
+  "<scratch_couch>": 25,
+  "<knock_glass>": 26,
+  "<hiss>": 27,
+  "<zoomies>": 28,
+  "<hairball>": 29,
+  "<stare>": 30,
+  "<bos>": 31,
+  "<eos>": 32,
+  "<pad>": 33
 }

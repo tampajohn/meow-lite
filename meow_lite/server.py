@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from meow_lite import neural
+from meow_lite.behavior import apply_triggers, weave
 from meow_lite.meow import MeowGenerator
 
 MODEL_ID = "meow-lite"
@@ -41,6 +42,15 @@ def _generate(prompt: str) -> str:
         if text:
             return text
     return _generator.generate(prompt)
+
+
+def _compose(prompt: str) -> str:
+    """Generated meows with forced misbehavior tokens woven in front."""
+    text = weave(apply_triggers(prompt), _generate(prompt))
+    # Preserve the v1 contract: output starts with a capital letter.
+    if text and text[0].isalpha() and text[0].islower():
+        text = text[0].upper() + text[1:]
+    return text
 
 
 class ChatMessage(BaseModel):
@@ -118,7 +128,7 @@ def list_models() -> dict[str, Any]:
 @app.post("/v1/chat/completions")
 def chat_completions(request: ChatCompletionRequest) -> Any:
     prompt = _last_user_text(request.messages)
-    text = _generate(prompt)
+    text = _compose(prompt)
     prompt_tokens, completion_tokens, total_tokens = _token_counts(text, prompt)
 
     if request.stream:
@@ -194,7 +204,7 @@ def chat_completions(request: ChatCompletionRequest) -> Any:
 @app.post("/v1/messages")
 def anthropic_messages(request: AnthropicMessagesRequest) -> Any:
     prompt = _last_user_text(request.messages)
-    text = _generate(prompt)
+    text = _compose(prompt)
     _, output_tokens, _ = _token_counts(text, prompt)
 
     if request.stream:

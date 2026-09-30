@@ -7,7 +7,7 @@ from transformers import GPT2Config, GPT2LMHeadModel
 
 from meow_lite import neural, server
 from meow_lite.meow import VOCABULARY
-from meow_lite.tokenizer import MeowTokenizer
+from meow_lite.tokenizer import ACTION_TOKENS, MeowTokenizer
 
 MODEL_DIR = neural.DEFAULT_MODEL_PATH
 _VOCAB_SET = set(VOCABULARY)
@@ -29,7 +29,8 @@ def test_tokenizer_roundtrip():
     assert tokenizer.decode(ids, skip_special_tokens=True) == text
     raw_ids = tokenizer.encode(text, add_special_tokens=False)
     assert tokenizer.decode(raw_ids) == text
-    assert tokenizer.vocab_size == 2 * len(VOCABULARY) + 3 + 3  # lower+cap, .!?, bos/eos/pad
+    # lower+cap meow words, .!?, action tokens, bos/eos/pad
+    assert tokenizer.vocab_size == 2 * len(VOCABULARY) + 3 + len(ACTION_TOKENS) + 3
 
 
 def test_untrained_forward_logit_shape():
