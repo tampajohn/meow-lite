@@ -1,5 +1,9 @@
 # meow-lite
 
+<p align="center">
+  <img src="assets/logo.png" alt="meow-lite logo — the Go gopher in a cat costume" width="256">
+</p>
+
 A "real" LLM API shim: an OpenAI- and Anthropic-compatible HTTP server that accepts
 your chat completions and messages requests, thinks very hard about them, and responds
 exactly as a cat would — in meows. Drop-in compatible enough to point any SDK at it;
