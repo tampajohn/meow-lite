@@ -35,7 +35,7 @@ from meow_lite.behavior import weave  # noqa: E402
 from meow_lite.meow import MeowGenerator  # noqa: E402
 
 DEFAULT_TEACHER_URL = "http://100.88.243.42:8080/v1"
-TEACHER_MODEL = "qwen3.8-flash-next"
+TEACHER_MODEL = os.environ.get("MEOW_TEACHER_MODEL", "muse-glimmer-30b")
 TEMPERATURE = 1.0
 CONCURRENCY = 12
 BATCH_SIZE = 25
