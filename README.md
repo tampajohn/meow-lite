@@ -74,7 +74,7 @@ server. Pre-trained weights are also published at
 **How the server loads it**: on the first request, `meow_lite.server` checks
 `MEOW_LITE_MODEL_PATH` (default `models/meow-lite` relative to the repo root).
 If the directory exists and loads, generation runs through the model with
-sha256(prompt)-seeded sampling (temperature 1.0, max 16 tokens, stops at EOS),
+sha256(prompt)-seeded sampling (temperature 0.4 as of v4, max 16 tokens, stops at EOS),
 so the same prompt still yields the same meows. If the checkpoint is missing
 or fails to load, the server silently falls back to the v1 rule-based
 `MeowGenerator`. All endpoints and response shapes are unchanged.
@@ -125,3 +125,45 @@ streaming chunks), e.g. *"can I pet your belly?"* →
 `<bite> Mewmew mrow prrrt mraow mewmew!`.
 
 *feature request: a reviewer who touched the belly 0.05s too long*
+
+## v4: Feline Depth
+
+v4 deepens the bit: a reward channel for praise, six new stimulus triggers —
+two of them forcing TWO tokens, order matters — and MeowBench, a tiny eval
+harness that proves the cat still behaves.
+
+Two new action tokens (vocab size 34 → 36; the checkpoint was retrained —
+`/opt/homebrew/bin/uv run python train.py`):
+
+| Token | Meaning |
+|---|---|
+| `<purr>` | praise received. motor running. |
+| `<pounce>` | the red dot has been acquired (it has not) |
+
+New deterministic triggers (the full v3 table still applies, unchanged and in
+the same order; the reward rule is evaluated first, so `<purr>` always leads):
+
+| Prompt contains | Forced token(s) |
+|---|---|
+| `good cat`, `good boy`, `good girl`, or `who's a good` | `<purr>` + a warmer meow mix |
+| `cucumber` / `cucumbers` | `<hiss>` |
+| `dog` / `dogs` | `<hiss>` then `<stare>` |
+| `bath` / `baths` or `water` | `<zoomies>` |
+| `spray` / `sprays` | `<hiss>` |
+| `vacuum` / `vacuums` | `<hiss>` |
+| `laser` / `lasers` or `red dot` / `red dots` | `<stare>` then `<pounce>` |
+
+Each rule fires at most once; duplicate tokens across rules are dropped, first
+occurrence wins (*"the vet and the dog"* → `<hiss> <stare> …`). Praise also
+warms the meow mix toward `purrr`, `prrrt`, `mrrp`, `mrrrow` — weighted
+sampling in the v1 fallback, a +8.0 logit bias via a transformers
+`LogitsProcessor` in the neural engine. Seeding is untouched: the same prompt
+still always yields the same response.
+
+**MeowBench** scores trigger correctness (each rule fires when it should and
+ONLY when it should), meow-vocab purity of raw neural output, and cross-run
+determinism; it prints a report table and exits nonzero on any failure:
+
+```bash
+/opt/homebrew/bin/uv run python eval.py
+```
