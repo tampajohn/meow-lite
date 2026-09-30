@@ -30,7 +30,9 @@
   "<zoomies>": 28,
   "<hairball>": 29,
   "<stare>": 30,
-  "<bos>": 31,
-  "<eos>": 32,
-  "<pad>": 33
+  "<purr>": 31,
+  "<pounce>": 32,
+  "<bos>": 33,
+  "<eos>": 34,
+  "<pad>": 35
 }

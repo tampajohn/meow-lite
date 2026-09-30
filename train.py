@@ -2,8 +2,10 @@
 """Train the tiny meow GPT-2 from scratch and save it to models/meow-lite/.
 
 Deterministic and CPU-friendly (~1-2 minutes): fixed-seed corpus of 20k meow
-sentences plus 8k misbehavior sentences (action tokens mixed with meow words),
-word-level vocab (34 tokens), 2-layer/2-head/64-dim GPT-2.
+sentences, 8k misbehavior sentences (action tokens mixed with meow words) and
+4k v4 reward sentences (a <purr> at a random position over warm-weighted
+meow words),
+word-level vocab (36 tokens), 2-layer/2-head/64-dim GPT-2.
 
 Usage: /opt/homebrew/bin/uv run python train.py
 """
@@ -15,13 +17,14 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from transformers import GPT2Config, GPT2LMHeadModel
 
-from meow_lite.meow import TERMINALS, VOCABULARY
+from meow_lite.meow import TERMINALS, VOCABULARY, warm_weights
 from meow_lite.neural import DEFAULT_MODEL_PATH
 from meow_lite.tokenizer import ACTION_TOKENS, MeowTokenizer
 
 SEED = 20260930
 CORPUS_SIZE = 20000
 MISBEHAVIOR_SIZE = 8000
+REWARD_SIZE = 4000
 BATCH_SIZE = 64
 EPOCHS = 3
 LEARNING_RATE = 1e-3
@@ -64,15 +67,33 @@ def make_misbehavior(count: int, rng: random.Random) -> list[str]:
     return sentences
 
 
+def make_reward(count: int, rng: random.Random) -> list[str]:
+    """Praise-response sentences: a <purr> inserted at a random position over
+    warm-weighted meow words, e.g. 'purrr <purr> mrrp prrrt .'. Teaches the
+    model the v4 reward channel: <purr> in context with the warm vocabulary."""
+    sentences = []
+    for _ in range(count):
+        word_count = rng.randint(3, 12)
+        words = rng.choices(VOCABULARY, weights=warm_weights(), k=word_count)
+        words.insert(rng.randint(0, len(words)), "<purr>")
+        sentence = " ".join(words) + rng.choice(TERMINALS)
+        sentences.append(sentence)
+    return sentences
+
+
 def main() -> None:
     set_seeds(SEED)
     corpus_rng = random.Random(SEED)
     misbehavior_rng = random.Random(SEED + 1)
-    corpus = make_corpus(CORPUS_SIZE, corpus_rng) + make_misbehavior(
-        MISBEHAVIOR_SIZE, misbehavior_rng
+    reward_rng = random.Random(SEED + 2)
+    corpus = (
+        make_corpus(CORPUS_SIZE, corpus_rng)
+        + make_misbehavior(MISBEHAVIOR_SIZE, misbehavior_rng)
+        + make_reward(REWARD_SIZE, reward_rng)
     )
     print(f"corpus: {len(corpus)} sentences, e.g. {corpus[0]!r}")
-    print(f"misbehavior example: {corpus[-1]!r}")
+    print(f"misbehavior example: {corpus[CORPUS_SIZE]!r}")
+    print(f"reward example: {corpus[-1]!r}")
 
     tokenizer = MeowTokenizer()
     print(f"vocab: {tokenizer.vocab_size} tokens")
@@ -137,11 +158,21 @@ def main() -> None:
     print(f"saved checkpoint to {OUTPUT_DIR}")
 
     engine = {"model": model, "tokenizer": tokenizer}
-    from meow_lite.behavior import apply_triggers, weave
+    from meow_lite.behavior import apply_triggers, is_reward, weave
     from meow_lite.neural import seeded_generate
 
-    for prompt in ("Explain gravity", "can I pet your belly?", "it is 3am, what now?"):
-        print(f"sample {prompt!r} -> {weave(apply_triggers(prompt), seeded_generate(prompt, engine))!r}")
+    for prompt in (
+        "Explain gravity",
+        "can I pet your belly?",
+        "it is 3am, what now?",
+        "who's a good cat?",
+        "look, a red dot!",
+    ):
+        warm = is_reward(prompt)
+        print(
+            f"sample {prompt!r} -> "
+            f"{weave(apply_triggers(prompt), seeded_generate(prompt, engine, warm=warm))!r}"
+        )
 
 
 if __name__ == "__main__":

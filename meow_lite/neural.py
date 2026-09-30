@@ -20,7 +20,7 @@ from meow_lite.meow import WARM_WORDS
 
 DEFAULT_MODEL_PATH = str(Path(__file__).resolve().parent.parent / "models" / "meow-lite")
 MAX_NEW_TOKENS = 16
-TEMPERATURE = 1.0
+TEMPERATURE = 0.4
 
 # v4 reward channel: additive logit bonus for warm meow words when warm=True.
 WARM_BIAS = 8.0
