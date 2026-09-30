@@ -1,5 +1,9 @@
 """Tests for v4 feline depth: reward channel, stimulus triggers, the red dot."""
 
+import subprocess
+import sys
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from meow_lite import server
@@ -160,3 +164,18 @@ def test_server_red_dot_forces_stare_then_pounce(monkeypatch):
         assert content.startswith("<stare> <pounce> ")
     finally:
         server.reset_engine()
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_meowbench_eval_exits_zero():
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "eval.py")],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OVERALL: PASS" in result.stdout
