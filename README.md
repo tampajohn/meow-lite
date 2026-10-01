@@ -218,3 +218,43 @@ MEOW_LITE_ENGINE=v6 /opt/homebrew/bin/uv run python -c "1" # same, calmer cat
 Neither neural engine is the default yet: held-out synonym accuracy still
 sits below the >=90% comprehension gate, and only v6's 3% leak approaches the
 0% purity gate. v4 remains the default until both cats pass.
+
+## Text-to-Meow Audio
+
+The server can answer with **actual cat sounds**. `POST /v1/meow/audio` accepts
+the same chat-completions JSON as `/v1/chat/completions`, generates the text
+with the active engine (v4/v5/v6 — same path as text mode), then renders it as
+a wav by concatenating clips from a bank of real cat recordings. Action tokens
+become their signature sound (`<purr>` → purr clip, `<hiss>` → hiss,
+`<bite>`/`<scratch>`/`<knock_glass>`/... → bite/hiss alternation, `<zoomies>` →
+meow), meow words become meow clips, punctuation becomes 120 ms of silence.
+Rendering is deterministic (seeded by sha256 of the text) and the response
+carries the text in the `X-Meow-Text` header:
+
+```bash
+curl -s -X POST http://localhost:8000/v1/meow/audio \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"who touched the belly"}]}' \
+  -o meow.wav -D -   # wav body + X-Meow-Text header
+```
+
+If the clip bank has not been prepared, the endpoint returns a clear 503 and
+every other endpoint keeps working.
+
+### Clip bank
+
+The bank is built from [liladhii/isolated-cat-meows](https://huggingface.co/datasets/liladhii/isolated-cat-meows)
+(~4,750 isolated cat-meow clips, 16-44 kHz mono/stereo) — unlabeled, so
+`tools/prepare_meow_audio.py` buckets clips by signal statistics (duration,
+RMS, spectral centroid, percentile-based): low centroid + long → purr, top
+centroid → hiss, shortest → bite, everything else → meow. It banks the
+longest onset-clean clips per bucket, downsampled to 16 kHz mono 16-bit.
+
+```bash
+# After downloading the dataset snapshot to a local directory:
+/opt/homebrew/bin/uv run python tools/prepare_meow_audio.py \
+  --src /path/to/wav_snapshot --out assets/audio
+```
+
+Point the server at a different bank with `MEOW_AUDIO_DIR` (default
+`assets/audio`). numpy + stdlib only — no new heavy deps.

@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from meow_lite import neural, neural_v6
+from meow_lite import meow_tts, neural, neural_v6
 from meow_lite.behavior import apply_triggers, is_reward, weave
 from meow_lite.meow import MeowGenerator
 
@@ -327,3 +327,41 @@ def anthropic_messages(request: AnthropicMessagesRequest) -> Any:
         "stop_sequence": None,
         "usage": {"input_tokens": len(prompt.split()), "output_tokens": output_tokens},
     }
+
+
+@app.post("/v1/meow/audio")
+def meow_audio(request: ChatCompletionRequest) -> Any:
+    """Chat completions, but the response comes back as actual cat audio.
+
+    Text is generated via the ACTIVE engine (same v4/v5/v6 path as
+    /v1/chat/completions), then rendered by concatenating real cat clips.
+    The wav carries the text in the X-Meow-Text header. Returns 503 when the
+    clip bank has not been prepared (assets/audio/clips.json missing) — other
+    endpoints are unaffected.
+    """
+    prompt = _last_user_text(request.messages)
+    text = _compose(prompt)
+    directory = Path(
+        os.environ.get("MEOW_AUDIO_DIR", str(meow_tts.DEFAULT_CLIPS_DIR))
+    )
+    try:
+        wav_bytes = meow_tts.render(text, directory=directory)
+    except FileNotFoundError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "message": (
+                        "meow audio clip bank not prepared: clips.json missing "
+                        f"under {directory}. Run tools/prepare_meow_audio.py "
+                        "--src <dir of wavs> --out assets/audio first."
+                    ),
+                    "type": "audio_not_ready",
+                }
+            },
+        )
+    return Response(
+        content=wav_bytes,
+        media_type="audio/wav",
+        headers={"X-Meow-Text": text},
+    )
