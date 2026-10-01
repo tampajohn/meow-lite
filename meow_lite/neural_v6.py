@@ -16,7 +16,7 @@ from pathlib import Path
 
 DEFAULT_MODEL_PATH = str(Path(__file__).resolve().parent.parent / "models" / "meow-lite-v6")
 MAX_NEW_TOKENS = 48  # BPE splits meow words into subwords; v4's 3-12 words ≈ 8-30 tokens
-MIN_NEW_TOKENS = 6  # ~2 word floor; 10 forced the model into noisy tails
+MIN_NEW_TOKENS = 14  # ~4-5 word floor: "Purrr." is only 6 BPE subwords; v4-grade chattiness
 
 _PUNCT_RUN = re.compile(r"([.!?]){2,}")
 _GLUE_AFTER_PUNCT = re.compile(r"([.!?])([^\s])")
