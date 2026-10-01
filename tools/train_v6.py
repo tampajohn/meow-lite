@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers
 from tokenizers.trainers import BpeTrainer
 from torch.utils.data import DataLoader, TensorDataset
@@ -137,6 +138,7 @@ def run_training(
     max_len: int = DEFAULT_MAX_LEN,
     max_steps: int = 0,
     limit: int = 0,
+    decision_weight: float = 1.0,
     log=print,
 ):
     """Train and save; returns (loss_history, tokenizer, model)."""
@@ -189,13 +191,33 @@ def run_training(
                 batch_labels.to(resolved),
             )
             optimizer.zero_grad()
-            output = model(
-                input_ids=batch_ids, attention_mask=batch_mask, labels=batch_labels
-            )
-            output.loss.backward()
+            if decision_weight != 1.0:
+                # Decision-weighted loss: the fire/no-fire signal lives in the
+                # first ~2 response positions; meow prose would otherwise get
+                # ~85% of the gradient. Weight decision positions accordingly.
+                logits = model(input_ids=batch_ids, attention_mask=batch_mask).logits
+                shift_logits = logits[:, :-1, :].contiguous()
+                shift_labels = batch_labels[:, 1:].contiguous()
+                unmasked = shift_labels != -100
+                weights = unmasked.float()
+                for row in range(shift_labels.size(0)):
+                    idx = torch.nonzero(unmasked[row]).flatten()
+                    weights[row, idx[:2]] = decision_weight
+                per_token = F.cross_entropy(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.clamp_min(0).view(-1),
+                    reduction="none",
+                ).view_as(shift_labels)
+                loss = (per_token * weights).sum() / weights.sum().clamp_min(1.0)
+            else:
+                output = model(
+                    input_ids=batch_ids, attention_mask=batch_mask, labels=batch_labels
+                )
+                loss = output.loss
+            loss.backward()
             optimizer.step()
             scheduler.step()
-            losses.append(output.loss.item())
+            losses.append(loss.item())
             step += 1
             if step % 25 == 0:
                 log(f"[train] step {step}/{total_steps}: loss {losses[-1]:.4f}")
@@ -223,6 +245,8 @@ def main() -> None:
     parser.add_argument("--vocab-size", type=int, default=DEFAULT_VOCAB_SIZE)
     parser.add_argument("--max-len", type=int, default=DEFAULT_MAX_LEN)
     parser.add_argument("--seed", type=int, default=20261001)
+    parser.add_argument("--decision-weight", type=float, default=1.0,
+                        help="loss weight for the first 2 response positions (the fire/no-fire decision); 1.0 = uniform")
     parser.add_argument("--smoke", action="store_true", help="32 examples, 5 steps")
     args = parser.parse_args()
 
@@ -239,6 +263,7 @@ def main() -> None:
         "seed": args.seed,
         "vocab_size": args.vocab_size,
         "max_len": args.max_len,
+        "decision_weight": args.decision_weight,
     }
     params.update(overrides)
     run_training(**params)
