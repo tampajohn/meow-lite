@@ -11,11 +11,34 @@ neural.py); sampling at temperature 0.4 / top_p 0.95.
 
 import hashlib
 import random
+import re
 from pathlib import Path
 
 DEFAULT_MODEL_PATH = str(Path(__file__).resolve().parent.parent / "models" / "meow-lite-v6")
-MAX_NEW_TOKENS = 24
-MIN_NEW_TOKENS = 3  # never let an untrained model end on the very first token
+MAX_NEW_TOKENS = 48  # BPE splits meow words into subwords; v4's 3-12 words ≈ 8-30 tokens
+MIN_NEW_TOKENS = 6  # ~2 word floor; 10 forced the model into noisy tails
+
+_PUNCT_RUN = re.compile(r"([.!?]){2,}")
+_GLUE_AFTER_PUNCT = re.compile(r"([.!?])([^\s])")
+
+
+def _polish(text: str) -> str:
+    """Presentation cleanup so v6 prose reads like v4: spaces between glued
+    action tokens and words, single punctuation marks, capitalized first letter."""
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text.replace("><", "> <")  # "<hiss><stare>" -> "<hiss> <stare>"
+    text = re.sub(r">(?=[A-Za-z])", "> ", text)  # "<stare>Mraow" -> "<stare> Mraow"
+    text = re.sub(r"([A-Za-z.])(?=<)", r"\1 ", text)  # "Mraow<bite>" -> "Mraow <bite>"
+    text = _PUNCT_RUN.sub(r"\1", text)  # "?!?!" -> "?"
+    text = _GLUE_AFTER_PUNCT.sub(r"\1 \2", text)  # "Mrow!Prrrt" -> "Mrow! Prrrt"
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)  # BPE camelGlue -> two words
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text.startswith("<"):
+        match = re.search(r"[A-Za-z]", text)
+        if match:
+            i = match.start()
+            text = text[:i] + text[i].upper() + text[i + 1 :]
+    return text
 TEMPERATURE = 0.4
 TOP_P = 0.95
 
@@ -133,4 +156,4 @@ def seeded_generate(prompt: str, engine, max_new: int = MAX_NEW_TOKENS) -> str:
             pad_token_id=tokenizer.pad_id,
         )
     new_ids = output[0][input_ids.shape[1]:]
-    return tokenizer.decode_response(new_ids)
+    return _polish(tokenizer.decode_response(new_ids))
