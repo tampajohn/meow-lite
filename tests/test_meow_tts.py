@@ -249,3 +249,63 @@ def test_endpoint_503_does_not_break_other_endpoints(client, tmp_path, monkeypat
     )
     assert chat.status_code == 200
     assert chat.json()["choices"][0]["message"]["content"]
+
+
+# --------------------------------------------------------------------------
+# /v1/meow/clip — per-action-token single clip endpoint
+# --------------------------------------------------------------------------
+
+def _clip_request(client, token, variety=None):
+    url = "/v1/meow/clip"
+    if variety is not None:
+        import urllib.parse
+
+        url += f"?token={urllib.parse.quote(token)}&variety={urllib.parse.quote(variety)}"
+    else:
+        url += f"?token={urllib.parse.quote(token)}"
+    return client.get(url)
+
+
+@pytest.mark.parametrize("token", sorted(meow_tts.ACTION_BUCKETS))
+def test_clip_endpoint_returns_wav_for_every_action_token(client, bank, token):
+    response = _clip_request(client, token, variety="x")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("audio/wav")
+    with wave.open(io.BytesIO(response.content), "rb") as wav:
+        assert wav.getnchannels() == 1
+        assert wav.getsampwidth() == 2
+        assert wav.getframerate() == SAMPLE_RATE
+        assert wav.getnframes() > 0
+
+
+def test_clip_lookup_is_case_and_bracket_insensitive(client, bank):
+    canonical = _clip_request(client, "<bite>", variety="v").content
+    assert _clip_request(client, "bite", variety="v").content == canonical
+    assert _clip_request(client, "Bite", variety="v").content == canonical
+    assert _clip_request(client, " BITE ", variety="v").content == canonical
+
+
+def test_clip_is_deterministic_per_token_and_variety(client, bank):
+    a1 = _clip_request(client, "<zoomies>", variety="one").content
+    a2 = _clip_request(client, "<zoomies>", variety="one").content
+    b = _clip_request(client, "<zoomies>", variety="two").content
+    assert a1 == a2  # same params -> same bytes
+    assert a1 != b  # different variety -> different pick
+
+
+def test_clip_unknown_token_is_404(client, bank):
+    response = _clip_request(client, "<dog>", variety="x")
+    assert response.status_code == 404
+    assert "unknown action token" in response.json()["error"]["message"]
+    # Bare word without brackets is also recognized as unknown.
+    assert _clip_request(client, "dog", variety="x").status_code == 404
+
+
+def test_clip_503_without_bank(client, tmp_path, monkeypatch):
+    empty = tmp_path / "no-bank"
+    empty.mkdir()
+    monkeypatch.setenv("MEOW_AUDIO_DIR", str(empty))
+    assert _clip_request(client, "<bite>", variety="x").status_code == 503
+    # And the text-audio sibling fails the same way without crashing others.
+    assert _audio_request(client).status_code == 503
+    assert client.get("/health").status_code == 200

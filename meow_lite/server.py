@@ -368,3 +368,47 @@ def meow_audio(request: ChatCompletionRequest) -> Any:
         media_type="audio/wav",
         headers={"X-Meow-Text": text},
     )
+
+
+@app.get("/v1/meow/clip")
+def meow_clip(token: str, variety: Optional[str] = None) -> Any:
+    """One clip for an action token — the chip-tap sound in MeowLite.
+
+    GET /v1/meow/clip?token=<bite>&variety=<optional string>. Token lookup is
+    case-insensitive and the <> are optional ("Bite", "<bite>", "bite" all
+    work). Deterministic per (token, variety). Unknown token -> 404; missing
+    clip bank -> 503, same as /v1/meow/audio.
+    """
+    directory = Path(
+        os.environ.get("MEOW_AUDIO_DIR", str(meow_tts.DEFAULT_CLIPS_DIR))
+    )
+    try:
+        wav_bytes = meow_tts.render_clip(token, variety or "", directory=directory)
+    except meow_tts.UnknownTokenError:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": {
+                    "message": (
+                        f"unknown action token: {token!r}. Known tokens: "
+                        + ", ".join(sorted(meow_tts.ACTION_BUCKETS))
+                    ),
+                    "type": "unknown_token",
+                }
+            },
+        )
+    except FileNotFoundError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "message": (
+                        "meow audio clip bank not prepared: clips.json missing "
+                        f"under {directory}. Run tools/prepare_meow_audio.py "
+                        "--src <dir of wavs> --out assets/audio first."
+                    ),
+                    "type": "audio_not_ready",
+                }
+            },
+        )
+    return Response(content=wav_bytes, media_type="audio/wav")

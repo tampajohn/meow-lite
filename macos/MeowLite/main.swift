@@ -176,27 +176,220 @@ private final class ChatModel: ObservableObject {
         players[messageID] = player // keep alive while playing
     }
 
+    /// Chip tap: fetch ONE clip for an action token and play it.
+    /// Errors are silent by design — the chip just doesn't play.
+    func playClip(_ action: String, messageID: UUID, engine: Engine) {
+        Task { await fetchAndPlayClip(action: action, messageID: messageID, engine: engine) }
+    }
+
+    private func fetchAndPlayClip(action: String, messageID: UUID, engine: Engine) async {
+        var components = URLComponents(
+            url: engine.baseURL.appending(path: "meow/clip"), resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "token", value: action),
+            URLQueryItem(name: "variety", value: messageID.uuidString), // message-scoped
+        ]
+        guard let url = components?.url else { return }
+        guard let (data, response) = try? await session.data(for: URLRequest(url: url)),
+              let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode),
+              let player = makePlayer(data: data, messageID: messageID)
+        else { return }
+        // Idempotent, same rules as play(_:): no overlapping audio per message.
+        players[messageID]?.stop()
+        player.play()
+        players[messageID] = player // strong ref while playing
+    }
+
     private func update(_ id: UUID, _ mutate: (inout ChatMessage) -> Void) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         mutate(&messages[index])
+    }
+
+    private func makePlayer(data: Data, messageID: UUID) -> AVAudioPlayer? {
+        if let player = try? AVAudioPlayer(data: data) { return player }
+        // Data-init can be finicky; fall back to a temp file.
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meowlite-clip-\(messageID.uuidString).wav")
+        try? data.write(to: url)
+        return try? AVAudioPlayer(contentsOf: url)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Action-token chips
+// ---------------------------------------------------------------------------
+
+private struct ChipSpec {
+    let label: String
+    let symbol: String
+    let color: Color
+    let subtext: String
+}
+
+private let chipSpecs: [String: ChipSpec] = [
+    "bite": ChipSpec(label: "BITE", symbol: "mouth", color: .red,
+                     subtext: "you touched the belly 0.05s too long"),
+    "scratch": ChipSpec(label: "SCRATCH", symbol: "hand.raised.fill", color: .indigo,
+                        subtext: "generic scratching"),
+    "scratch_couch": ChipSpec(label: "COUCH", symbol: "sofa.fill", color: .brown,
+                              subtext: "the couch, specifically"),
+    "knock_glass": ChipSpec(label: "GLASS", symbol: "wineglass.fill", color: .blue,
+                            subtext: "it was on the table; now it's on the floor"),
+    "hiss": ChipSpec(label: "HISS", symbol: "wind", color: .orange,
+                     subtext: "the vet, a vacuum, or betrayal"),
+    "zoomies": ChipSpec(label: "ZOOMIES", symbol: "bolt.fill", color: .purple,
+                        subtext: "it is 3am. run."),
+    "hairball": ChipSpec(label: "HAIRBALL", symbol: "circle.fill", color: .yellow,
+                         subtext: "a gift, deposited"),
+    "stare": ChipSpec(label: "STARE", symbol: "eye.fill", color: .gray,
+                      subtext: "unmoving. judging."),
+    "pounce": ChipSpec(label: "POUNCE", symbol: "arrow.up.right", color: .green,
+                       subtext: "the red dot must die"),
+    "purr": ChipSpec(label: "PURR", symbol: "heart.fill", color: .pink,
+                     subtext: "you did something right"),
+]
+
+private struct Segment: Identifiable {
+    let id: Int
+    let text: String?
+    let action: String?
+}
+
+private let actionRegex = try! NSRegularExpression(pattern: "<([A-Za-z_]+)>")
+
+private func parseSegments(_ text: String) -> [Segment] {
+    let nsText = text as NSString
+    var segments: [Segment] = []
+    var cursor = text.startIndex
+    for match in actionRegex.matches(
+        in: text, range: NSRange(location: 0, length: nsText.length)
+    ) {
+        guard let whole = Range(match.range, in: text),
+              let nameRange = Range(match.range(at: 1), in: text)
+        else { continue }
+        if whole.lowerBound > cursor {
+            segments.append(
+                Segment(id: segments.count,
+                        text: String(text[cursor ..< whole.lowerBound]),
+                        action: nil)
+            )
+        }
+        let name = String(text[nameRange]).lowercased()
+        if chipSpecs[name] != nil {
+            segments.append(Segment(id: segments.count, text: nil, action: name))
+        } else { // not a known action: keep the literal
+            segments.append(Segment(id: segments.count, text: String(text[whole]), action: nil))
+        }
+        cursor = whole.upperBound
+    }
+    if cursor < text.endIndex {
+        segments.append(Segment(id: segments.count, text: String(text[cursor...]), action: nil))
+    }
+    return segments
+}
+
+/// Minimal wrapping flow layout (WrappingHStack-style): lays subviews in rows,
+/// breaking when the next subview would exceed the available width. Text runs
+/// wider than the row get a width-capped proposal so they wrap naturally;
+/// chips stay .fixedSize.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    private func sizes(for subviews: Subviews, maxWidth: CGFloat) -> [CGSize] {
+        subviews.map { sub in
+            let ideal = sub.sizeThatFits(.unspecified)
+            guard ideal.width > maxWidth else { return ideal }
+            return sub.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let sizes = sizes(for: subviews, maxWidth: maxWidth)
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for size in sizes {
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        let width = proposal.width ?? max(0, x - (sizes.isEmpty ? 0 : spacing))
+        return CGSize(width: width, height: y + rowHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        let sizes = sizes(for: subviews, maxWidth: bounds.width)
+        var x: CGFloat = bounds.minX
+        var y: CGFloat = bounds.minY
+        var rowHeight: CGFloat = 0
+        for (index, subview) in subviews.enumerated() {
+            let size = sizes[index]
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+private struct ActionChipView: View {
+    let spec: ChipSpec
+    let onTap: () -> Void
+    @State private var pressed = false
+
+    var body: some View {
+        Button {
+            onTap()
+            pressed = true
+            Task { // brief pressed state
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                pressed = false
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: spec.symbol)
+                    .font(.callout)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(spec.label)
+                        .font(.caption.weight(.bold))
+                        .kerning(0.5)
+                    Text(spec.subtext)
+                        .font(.caption2)
+                        .opacity(0.7)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(spec.color.opacity(pressed ? 0.85 : 0.45))
+            .foregroundStyle(Color.primary)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help(spec.subtext)
     }
 }
 
 private struct BubbleView: View {
     let message: ChatMessage
     let onReplay: () -> Void
+    var onChipTap: ((String) -> Void)? = nil
 
     var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 48) }
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-                Text(message.text)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(bubbleColor)
-                    .foregroundStyle(message.role == .error ? Color.white : Color.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                bubbleContent
                 if message.audioData != nil {
                     Button(action: onReplay) {
                         Label("replay", systemImage: "waveform.play")
@@ -209,6 +402,39 @@ private struct BubbleView: View {
             if message.role != .user { Spacer(minLength: 48) }
         }
         .padding(.horizontal, 12)
+    }
+
+    /// Action tokens render as tappable chips inline with the text runs;
+    /// errors stay plain text.
+    @ViewBuilder
+    private var bubbleContent: some View {
+        if message.role == .error {
+            Text(message.text)
+                .textSelection(.enabled)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(bubbleColor)
+                .foregroundStyle(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+        } else {
+            FlowLayout(spacing: 6) {
+                ForEach(parseSegments(message.text)) { segment in
+                    if let action = segment.action, let spec = chipSpecs[action] {
+                        ActionChipView(spec: spec) {
+                            onChipTap?(action)
+                        }
+                    } else if let text = segment.text, !text.isEmpty {
+                        Text(text)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(bubbleColor)
+            .foregroundStyle(Color.primary)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     private var bubbleColor: Color {
@@ -296,9 +522,13 @@ struct ContentView: View {
                 ScrollViewReader { proxy in
                     LazyVStack(spacing: 10) {
                         ForEach(model.messages) { message in
-                            BubbleView(message: message) {
-                                model.play(message.id)
-                            }
+                            BubbleView(
+                                message: message,
+                                onReplay: { model.play(message.id) },
+                                onChipTap: { action in
+                                    model.playClip(action, messageID: message.id, engine: engine)
+                                }
+                            )
                             .id(message.id)
                         }
                     }

@@ -253,7 +253,12 @@ def render(
     if not pieces:
         pieces = [_silence(WORD_GAP_MS)]
 
-    pcm = np.concatenate(pieces).astype(np.float64)
+    return _encode_wav(np.concatenate(pieces))
+
+
+def _encode_wav(pcm: np.ndarray) -> bytes:
+    """Peak-normalize to -3 dBFS and emit a 16 kHz mono 16-bit wav."""
+    pcm = pcm.astype(np.float64)
     peak = float(np.max(np.abs(pcm))) if len(pcm) else 0.0
     if peak > 0.0:
         target = 10.0 ** (PEAK_TARGET_DB / 20.0) * 32767.0
@@ -266,3 +271,47 @@ def render(
         wav.setframerate(SAMPLE_RATE)
         wav.writeframes(pcm.astype(np.int16).tobytes())
     return buf.getvalue()
+
+
+class UnknownTokenError(KeyError):
+    """Raised by render_clip for tokens outside ACTION_BUCKETS."""
+
+
+def normalize_action_token(token: str) -> str:
+    """Canonical action token: case-insensitive, optional <> ("Bite" -> "<bite>")."""
+    cleaned = token.strip().lower()
+    if cleaned.startswith("<") and cleaned.endswith(">"):
+        cleaned = cleaned[1:-1].strip()
+    return f"<{cleaned}>"
+
+
+def render_clip(token: str, variety: str = "", directory: Path | None = None) -> bytes:
+    """Render ONE clip for an action token, as wav bytes.
+
+    Bucket = ACTION_BUCKETS[token][0]; the clip is chosen deterministically
+    from that bucket with seed sha256(token + "|" + variety). Single clip —
+    no gaps, peak-normalized to -3 dBFS like render.
+
+    Raises UnknownTokenError for tokens outside ACTION_BUCKETS and
+    FileNotFoundError when the clip bank has not been prepared.
+    """
+    token_key = normalize_action_token(token)
+    if token_key not in ACTION_BUCKETS:
+        raise UnknownTokenError(token_key)
+    bucket = ACTION_BUCKETS[token_key][0]
+
+    index = load_clips(directory)  # FileNotFoundError -> caller handles (503)
+    clips = index.get(bucket)
+    if not clips:  # bucket absent from the bank; same fallback chain as render
+        for fallback in ("meow", *sorted(index)):
+            if index.get(fallback):
+                clips = index[fallback]
+                break
+    if not clips:
+        raise RuntimeError("clip bank has no usable clips")
+
+    seed = int.from_bytes(
+        sha256(f"{token_key}|{variety}".encode("utf-8")).digest()[:8], "big"
+    )
+    clip = clips[random.Random(seed).randrange(len(clips))]
+    return _encode_wav(load_wav_mono16k(clip["path"]))
