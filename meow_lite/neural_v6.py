@@ -10,6 +10,7 @@ neural.py); sampling at temperature 0.4 / top_p 0.95.
 """
 
 import hashlib
+import os
 import random
 import re
 from pathlib import Path
@@ -131,6 +132,24 @@ def build_action_once(tokenizer: "tokenizer_v6.TokenizerV6"):
     return ActionOnceLogitsProcessor()
 
 
+def build_action_damping(tokenizer: "tokenizer_v6.TokenizerV6", damping: float):
+    """ActionDampingLogitsProcessor: subtract `damping` from every action
+    token's logit at every step. Confident comprehension (real triggers, big
+    positive logits) still fires; low-confidence bleed dies. 0.0 = no-op.
+    Tunable via MEOW_ACTION_DAMPING."""
+    from transformers import LogitsProcessor
+
+    action_ids = sorted(set(tokenizer.action_ids))
+
+    class ActionDampingLogitsProcessor(LogitsProcessor):
+        def __call__(self, input_ids, scores):
+            if damping:
+                scores[:, action_ids] -= damping
+            return scores
+
+    return ActionDampingLogitsProcessor()
+
+
 def load(model_dir=None):
     """Load the v6 checkpoint; returns (model, tokenizer) dict or None."""
     path = model_dir or DEFAULT_MODEL_PATH
@@ -150,6 +169,10 @@ def load(model_dir=None):
             "path": str(path),
             "cat_mask": processor,
             "action_once": build_action_once(tokenizer),
+            "action_damping": build_action_damping(
+                # d=2 is the measured crossover: -1.6pt accuracy for ~0% bleed
+                tokenizer, float(os.environ.get("MEOW_ACTION_DAMPING", "2.0"))
+            ),
         }
     except Exception:
         return None
@@ -173,7 +196,11 @@ def seeded_generate(prompt: str, engine, max_new: int = MAX_NEW_TOKENS) -> str:
         output = model.generate(
             input_ids,
             attention_mask=attention_mask,
-            logits_processor=[engine["cat_mask"], engine["action_once"]],
+            logits_processor=[
+                engine["cat_mask"],
+                engine["action_once"],
+                engine["action_damping"],
+            ],
             do_sample=True,
             temperature=TEMPERATURE,
             top_p=TOP_P,
