@@ -16,6 +16,7 @@ throughout.
 
 import argparse
 import json
+import shutil
 import sys
 import wave
 from pathlib import Path
@@ -85,16 +86,70 @@ def assign_buckets(entries: list[dict]) -> None:
             entry["bucket"] = "meow"
 
 
+def call_count(pcm: np.ndarray) -> int:
+    """Meow-call count via 50ms RMS envelope peaks (threshold 25% of max).
+
+    Many 'isolated' dataset clips actually contain meow chains (4-6 calls);
+    curation must prefer true single-call clips or one clip sounds like three.
+    """
+    if len(pcm) == 0:
+        return 0
+    work = pcm.astype(np.float64)  # int16 squaring overflows to negatives -> NaN env
+    win = max(int(SAMPLE_RATE * 0.05), 1)
+    env = np.sqrt(np.convolve(work**2, np.ones(win) / win, mode="same"))
+    floor = env.max() * 0.25
+    if floor <= 0:
+        return 0
+    above = env > floor
+    edges = np.diff(above.astype(int))
+    return int((edges == 1).sum()) if above.any() else 0
+
+
 def _bank_rank(entry: dict) -> tuple:
-    """Longest-onset-clean first: clean onsets win, then longest, then name."""
+    """Single-call clips win; then clean onset; then duration closest to 0.8s."""
+    multi = 0 if entry["calls"] == 1 else 1
     clean = 0 if entry["onset_silence"] <= ONSET_CLEAN_MAX_S else 1
-    return (clean, -entry["duration"], entry["file"])
+    return (multi, clean, abs(entry["duration"] - 0.8), entry["file"])
+
+
+def segment_first_call(pcm: np.ndarray) -> np.ndarray:
+    """Extract the first meow call: first rise above 25% envelope, cut at the
+    first sustained dip (150ms below floor), 50ms margins.
+
+    The source dataset is ~99.5% multi-call recordings (26 single-call clips
+    of 4,750), so curation-by-selection cannot work; every banked clip is
+    segmented down to one call instead.
+    """
+    if len(pcm) == 0:
+        return pcm
+    work = pcm.astype(np.float64)  # int16 squaring overflows to negatives -> NaN env
+    win = max(int(SAMPLE_RATE * 0.05), 1)
+    env = np.sqrt(np.convolve(work**2, np.ones(win) / win, mode="same"))
+    floor = env.max() * 0.25
+    if floor <= 0:
+        return pcm
+    above = env > floor
+    if not above.any():
+        return pcm
+    rise = int(np.argmax(above))
+    dip_needed = int(0.012 * SAMPLE_RATE)  # pulse gaps are 10-50ms; must catch narrow valleys
+    below = ~above
+    end = len(pcm)
+    step = max(win // 8, 1)  # 6ms: cursor must not jump over narrow dips
+    cursor = rise + int(0.1 * SAMPLE_RATE)
+    while cursor < len(pcm) - dip_needed:
+        if below[cursor : cursor + dip_needed].all():
+            end = cursor + dip_needed // 2
+            break
+        cursor += step
+    margin = int(0.05 * SAMPLE_RATE)
+    return pcm[max(0, rise - margin) : min(len(pcm), end + margin)]
 
 
 def write_clip(path: Path, pcm: np.ndarray, max_seconds: float = MAX_CLIP_SECONDS) -> None:
-    """Write mono 16 kHz 16-bit PCM, truncated to max_seconds."""
+    """Write mono 16 kHz 16-bit PCM, segmented to the first call, then truncated."""
     limit = int(max_seconds * SAMPLE_RATE)
-    data = pcm[:limit]
+    data = segment_first_call(pcm)[:limit]
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
@@ -124,6 +179,7 @@ def prepare(src: Path, out: Path, clips_per_bucket: int = CLIPS_PER_BUCKET,
             continue
         entry = {"file": path.name, **clip_features(pcm)}
         entry["onset_silence"] = leading_silence_seconds(pcm)
+        entry["calls"] = call_count(pcm)
         if entry["rms"] == 0.0:
             # Fully silent clips carry no feline signal and would poison the
             # percentile bucketing on small corpora.
@@ -136,6 +192,8 @@ def prepare(src: Path, out: Path, clips_per_bucket: int = CLIPS_PER_BUCKET,
     entries.sort(key=lambda entry: entry["file"])  # deterministic ordering
 
     clips_root = out / "clips"
+    if clips_root.exists():
+        shutil.rmtree(clips_root)  # stale bank: re-curation must not mix generations
     banked_count = 0
     for bucket in BUCKETS:
         members = [entry for entry in entries if entry["bucket"] == bucket]
