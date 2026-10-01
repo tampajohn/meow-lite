@@ -9,6 +9,12 @@ your chat completions and messages requests, thinks very hard about them, and re
 exactly as a cat would — in meows. Drop-in compatible enough to point any SDK at it;
 technically state-of-the-art in feline alignment.
 
+**Weights & data (HuggingFace):**
+[v4 classic](https://huggingface.co/tampajohn/meow-lite) (104K meow toy) ·
+[v5 chaotic cat](https://huggingface.co/tampajohn/meow-lite-v5) (6.8M, 73.7% / 15%) ·
+[v6 calmer cat](https://huggingface.co/tampajohn/meow-lite-v6) (6.8M, 70.4% / 3%) ·
+[v6 dataset](https://huggingface.co/datasets/tampajohn/meow-lite-v6-dataset) (16,633 pairs + methodology)
+
 ## Quickstart
 
 ```bash
