@@ -157,12 +157,16 @@ def test_render_wav_is_valid_mono_16k_16bit(bank):
 
 
 def test_render_duration_tracks_units(bank):
-    with wave.open(io.BytesIO(meow_tts.render("Meow", directory=bank)), "rb") as wav:
-        one = wav.getnframes() / wav.getframerate()
-    with wave.open(io.BytesIO(meow_tts.render("Meow meow", directory=bank)), "rb") as wav:
-        two = wav.getnframes() / wav.getframerate()
-    # Second unit adds its clip plus the 40 ms gap.
-    assert two - one > 0.04
+    # Grouping contract: 2 prose words share one clip; the third adds one.
+    def duration_of(text: str) -> float:
+        with wave.open(io.BytesIO(meow_tts.render(text, directory=bank)), "rb") as wav:
+            return wav.getnframes() / wav.getframerate()
+
+    one = duration_of("Meow")
+    two = duration_of("Meow meow")
+    three = duration_of("Meow meow meow")
+    assert three - two > 0.04  # third word adds a clip plus the 40 ms gap
+    assert abs(two - one) < 0.6  # two words group into a single clip
 
 
 def test_punctuation_adds_silence(bank):

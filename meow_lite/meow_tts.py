@@ -79,6 +79,30 @@ def tokenize_units(text: str) -> list[tuple[str, str]]:
     return units
 
 
+def group_units(units: list[tuple[str, str]], size: int = 2) -> list[tuple[str, str]]:
+    """Group consecutive prose words into phrases of ``size`` words per clip.
+
+    Word-per-clip turns chatty responses into a meow machine gun; grouping
+    halves the rate while action tokens stay solo (they are the emphasis).
+    """
+    grouped: list[tuple[str, str]] = []
+    pending: list[str] = []
+    for kind, unit in units:
+        if kind == "word":
+            pending.append(unit)
+            if len(pending) == size:
+                grouped.append(("word", " ".join(pending)))
+                pending = []
+        else:
+            if pending:
+                grouped.append(("word", " ".join(pending)))
+                pending = []
+            grouped.append((kind, unit))
+    if pending:
+        grouped.append(("word", " ".join(pending)))
+    return grouped
+
+
 def load_wav_mono16k(path: Path, target_sr: int = SAMPLE_RATE) -> np.ndarray:
     """Decode any PCM wav (8/16/24/32-bit, mono/stereo) to mono 16k int16."""
     with wave.open(str(path), "rb") as wav:
@@ -194,7 +218,7 @@ def render(text: str, directory: Path | None = None, out_format: str = "wav") ->
         raise ValueError(f"unsupported audio format: {out_format!r}")
 
     index = load_clips(directory)  # FileNotFoundError -> caller handles (503)
-    units = tokenize_units(text)
+    units = group_units(tokenize_units(text))
     rng = random.Random(int.from_bytes(sha256(text.encode("utf-8")).digest()[:8], "big"))
     cycler = _ClipCycler(rng)
 
