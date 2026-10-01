@@ -36,8 +36,8 @@ ACTION_BUCKETS: dict[str, list[str]] = {
     "<bite>": ["bite", "hiss"],
     "<scratch>": ["bite", "hiss"],
     "<scratch_couch>": ["bite", "hiss"],
-    "<knock_glass>": ["bite", "hiss"],
-    "<hairball>": ["bite", "hiss"],
+    "<knock_glass>": ["hiss", "bite"],  # own acoustic space — never shares a file with bite
+    "<hairball>": ["hiss", "bite"],
     "<zoomies>": ["meow"],
     "<stare>": ["meow"],
     "<pounce>": ["meow"],
