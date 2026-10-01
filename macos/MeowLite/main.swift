@@ -92,6 +92,7 @@ private final class ChatModel: ObservableObject {
                 if let headerText, !headerText.isEmpty { message.text = headerText }
                 message.audioData = data
             }
+            play(pendingID)  // auto-play on receipt; replay button remains for later
         } catch {
             messages.removeAll { $0.id == pendingID }
             messages.append(
@@ -151,7 +152,18 @@ private final class ChatModel: ObservableObject {
         guard let message = messages.first(where: { $0.id == messageID }),
               let data = message.audioData
         else { return }
-        guard let player = try? AVAudioPlayer(data: data) else { return }
+        var player = try? AVAudioPlayer(data: data)
+        if player == nil {
+            // Data-init can be finicky; fall back to a temp file.
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("meowlite-\(messageID.uuidString).wav")
+            try? data.write(to: url)
+            player = try? AVAudioPlayer(contentsOf: url)
+        }
+        guard let player else {
+            NSLog("MeowLite: failed to create player for message %@", messageID.uuidString)
+            return
+        }
         player.play()
         players[messageID] = player // keep alive while playing
     }
