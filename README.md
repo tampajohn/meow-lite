@@ -258,3 +258,22 @@ longest onset-clean clips per bucket, downsampled to 16 kHz mono 16-bit.
 
 Point the server at a different bank with `MEOW_AUDIO_DIR` (default
 `assets/audio`). numpy + stdlib only — no new heavy deps.
+
+## macOS app (MeowLite)
+
+A minimal native SwiftUI chat client for the three local engines lives in
+`macos/MeowLite/` — single-file `main.swift`, no Xcode project, no external
+deps (SwiftUI + AVFoundation + Foundation).
+
+```bash
+cd macos/MeowLite && ./build.sh   # swiftc -> build/MeowLite.app, ad-hoc signed
+open build/MeowLite.app           # or: open macos/MeowLite/build/MeowLite.app
+```
+
+Features: segmented v4/v5/v6 engine picker (persisted), chat bubbles (cat
+amber, you gray, errors red), Return-to-send, "audio respond" toggle that
+also renders each reply via `/v1/meow/audio` and plays it inline with a
+per-bubble replay button, a branded splash screen on launch, and a live
+health line (green/red dot, polled every 10 s). Targets macOS 14+, arm64.
+
+screenshot: TODO — drop a PNG of the chat + splash here.
