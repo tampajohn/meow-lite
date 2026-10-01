@@ -37,7 +37,7 @@ from meow_lite.meow import MeowGenerator  # noqa: E402
 DEFAULT_TEACHER_URL = "http://100.88.243.42:8080/v1"
 TEACHER_MODEL = os.environ.get("MEOW_TEACHER_MODEL", "muse-glimmer-30b")
 TEMPERATURE = 1.0
-CONCURRENCY = 12
+CONCURRENCY = 8
 BATCH_SIZE = 25
 MAX_RETRIES = 6
 BACKOFF_BASE = 2.0
@@ -247,8 +247,10 @@ def teacher_call(
                     "model": model,
                     "messages": [{"role": "user", "content": user_prompt}],
                     "temperature": TEMPERATURE,
+                    "max_tokens": 4096,
+                    "chat_template_kwargs": {"enable_thinking": False},
                 },
-                timeout=180.0,
+                timeout=1800.0,
             )
             if response.status_code == 200:
                 content = response.json()["choices"][0]["message"]["content"]
