@@ -52,6 +52,8 @@ private final class ChatModel: ObservableObject {
 
     /// Strong refs to in-flight players so audio isn't deallocated mid-play.
     private var players: [UUID: AVAudioPlayer] = [:]
+    /// Per-session audio-variety counter (server salts the render seed with it).
+    private var varietyCounter = 0
     private let session: URLSession
 
     init() {
@@ -67,9 +69,13 @@ private final class ChatModel: ObservableObject {
         let pending = ChatMessage(role: .cat, text: "…", audioData: nil, pending: true)
         messages.append(ChatMessage(role: .user, text: trimmed, audioData: nil, pending: false))
         messages.append(pending)
+        varietyCounter += 1
         let payload: [String: Any] = [
             "model": "meow-lite",
             "messages": [["role": "user", "content": trimmed]],
+            // Fresh performance per ask: same text, different cat concerto.
+            // Text stays deterministic; variety only salts the audio render.
+            "variety": String(varietyCounter),
         ]
         Task { await complete(pendingID: pending.id, engine: engine, payload: payload) }
     }
@@ -164,6 +170,8 @@ private final class ChatModel: ObservableObject {
             NSLog("MeowLite: failed to create player for message %@", messageID.uuidString)
             return
         }
+        // Idempotent: stop any in-flight player for this message (no overlaps).
+        players[messageID]?.stop()
         player.play()
         players[messageID] = player // keep alive while playing
     }

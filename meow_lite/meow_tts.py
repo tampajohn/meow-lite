@@ -207,7 +207,12 @@ def _silence(ms: int) -> np.ndarray:
     return np.zeros(int(SAMPLE_RATE * ms / 1000), dtype=np.int16)
 
 
-def render(text: str, directory: Path | None = None, out_format: str = "wav") -> bytes:
+def render(
+    text: str,
+    directory: Path | None = None,
+    out_format: str = "wav",
+    seed_salt: str = "",
+) -> bytes:
     """Render ``text`` to wav bytes by concatenating clips from the bank.
 
     Deterministic: seeded by sha256(text). Punctuation becomes 120 ms silence,
@@ -219,7 +224,9 @@ def render(text: str, directory: Path | None = None, out_format: str = "wav") ->
 
     index = load_clips(directory)  # FileNotFoundError -> caller handles (503)
     units = group_units(tokenize_units(text))
-    rng = random.Random(int.from_bytes(sha256(text.encode("utf-8")).digest()[:8], "big"))
+    rng = random.Random(
+        int.from_bytes(sha256((text + "|" + seed_salt).encode("utf-8")).digest()[:8], "big")
+    )
     cycler = _ClipCycler(rng)
 
     pcm_cache: dict[Path, np.ndarray] = {}

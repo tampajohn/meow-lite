@@ -113,6 +113,7 @@ class ChatCompletionRequest(BaseModel):
     model: Optional[str] = None
     messages: list[ChatMessage]
     stream: bool = False
+    variety: Optional[str] = None  # audio only: mix into the render seed for a fresh performance
 
 
 class AnthropicMessage(BaseModel):
@@ -345,7 +346,9 @@ def meow_audio(request: ChatCompletionRequest) -> Any:
         os.environ.get("MEOW_AUDIO_DIR", str(meow_tts.DEFAULT_CLIPS_DIR))
     )
     try:
-        wav_bytes = meow_tts.render(text, directory=directory)
+        wav_bytes = meow_tts.render(
+            text, directory=directory, seed_salt=request.variety or ""
+        )
     except FileNotFoundError:
         return JSONResponse(
             status_code=503,
