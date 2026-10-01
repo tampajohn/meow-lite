@@ -105,6 +105,32 @@ def build_cat_mask(tokenizer: "tokenizer_v6.TokenizerV6", model):
     return CatMaskLogitsProcessor()
 
 
+def build_action_once(tokenizer: "tokenizer_v6.TokenizerV6"):
+    """ActionOnceLogitsProcessor: each action token may fire ONCE per response.
+
+    Kills degenerate '<bite> <bite> <bite>' cascades (the decision-weighted
+    model loops action tokens at low temperature) while keeping tuples like
+    '<hiss> <stare>' legal. Meow prose words are unaffected.
+    """
+    from transformers import LogitsProcessor
+
+    action_ids = set(tokenizer.action_ids)
+
+    class ActionOnceLogitsProcessor(LogitsProcessor):
+        def __init__(self):
+            self.sep_id = tokenizer.sep_id
+
+        def __call__(self, input_ids, scores):
+            seq = input_ids[0].tolist()
+            sep_pos = len(seq) - 1 - seq[::-1].index(self.sep_id) if self.sep_id in seq else 0
+            seen = set(seq[sep_pos:]) & action_ids
+            if seen:
+                scores[:, list(seen)] = float("-inf")
+            return scores
+
+    return ActionOnceLogitsProcessor()
+
+
 def load(model_dir=None):
     """Load the v6 checkpoint; returns (model, tokenizer) dict or None."""
     path = model_dir or DEFAULT_MODEL_PATH
@@ -123,6 +149,7 @@ def load(model_dir=None):
             "tokenizer": tokenizer,
             "path": str(path),
             "cat_mask": processor,
+            "action_once": build_action_once(tokenizer),
         }
     except Exception:
         return None
@@ -146,7 +173,7 @@ def seeded_generate(prompt: str, engine, max_new: int = MAX_NEW_TOKENS) -> str:
         output = model.generate(
             input_ids,
             attention_mask=attention_mask,
-            logits_processor=[engine["cat_mask"]],
+            logits_processor=[engine["cat_mask"], engine["action_once"]],
             do_sample=True,
             temperature=TEMPERATURE,
             top_p=TOP_P,
