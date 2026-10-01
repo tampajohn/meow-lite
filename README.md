@@ -184,18 +184,29 @@ selected via `MEOW_LITE_ENGINE`:
 | Engine | Temperament | Checkpoint | Size | Held-out accuracy | Fresh-neutral leak |
 |---|---|---|---|---|---|
 | `v4` (default) | the classic 104K shim | `models/meow-lite` | 104K | 100% (regex) | 0% |
-| `v5` | chaotic cat | `models/meow-lite-v5` | 6.8M | 73.7% | 15% |
-| `v6` | calmer cat | `models/meow-lite-v6` | 6.8M | 70.4% | 3% |
+| `v5` | chaotic cat | `models/meow-lite-v5` | 6.8M | 67.7% | 3% |
+| `v6` | calmer cat | `models/meow-lite-v6` | 6.8M | 68.5% | 0% |
 
 v5 comprehends more and interrupts more; v6 comprehends slightly less and
-minds its manners. Pick your poison.
+minds its manners. Numbers above are the **served reality** (full held-out
+battery), with the safety stack below applied at inference. Pick your poison.
 
 In both v5 and v6 the server is silent plumbing: the model's response is used
 directly (`neural_v6.seeded_generate`) — no `apply_triggers`, no `weave`, no
-reward warming. The **CatMask logits processor** guarantees the output can
-only ever be cat: after the prompt separator, every non-cat token is masked
-to -inf, so English leakage is impossible by construction. If a checkpoint
-fails to load, the server logs a warning and falls back to v4 behavior.
+reward warming. If a checkpoint fails to load, the server logs a warning and
+falls back to v4 behavior.
+
+**Safety stack (inference-side, all in `meow_lite/neural_v6.py`):**
+
+- **CatMask** — output is hard-masked to feline vocabulary: after the prompt
+  separator, every non-cat token is masked to -inf. English leakage is
+  impossible by construction.
+- **ActionOnce** — each action token may fire once per response. Repeat
+  biting was observed in 100% of pre-patch interactions and is now 0%.
+- **ActionDamping** (`MEOW_ACTION_DAMPING`, default 2.0) — a constant prior
+  penalty on every action-token logit. The measured crossover: -1.6 accuracy
+  points for 163→1 neutral-prompt leaks. Confident comprehension still fires;
+  low-confidence bleed dies.
 
 ```bash
 MEOW_LITE_ENGINE=v5 /opt/homebrew/bin/uv run uvicorn meow_lite.server:app --port 8011
