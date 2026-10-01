@@ -226,21 +226,22 @@ def main() -> None:
     parser.add_argument("--smoke", action="store_true", help="32 examples, 5 steps")
     args = parser.parse_args()
 
-    kwargs = {}
+    overrides = {}
     if args.smoke:
-        kwargs = {"limit": 32, "max_steps": 5, "epochs": 2, "batch_size": 8}
-    run_training(
-        data_path=args.data,
-        out_dir=args.out,
-        device=args.device,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        lr=args.lr,
-        seed=args.seed,
-        vocab_size=args.vocab_size,
-        max_len=args.max_len,
-        **kwargs,
-    )
+        overrides = {"limit": 32, "max_steps": 5, "epochs": 2, "batch_size": 8}
+    params = {
+        "data_path": args.data,
+        "out_dir": args.out,
+        "device": args.device,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "lr": args.lr,
+        "seed": args.seed,
+        "vocab_size": args.vocab_size,
+        "max_len": args.max_len,
+    }
+    params.update(overrides)
+    run_training(**params)
 
 
 if __name__ == "__main__":

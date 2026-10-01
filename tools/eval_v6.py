@@ -44,8 +44,10 @@ def load_rows(path) -> list[dict]:
 def response_correct(intent: str, response: str) -> bool:
     if intent in NEUTRAL_INTENTS:
         return not any(token in response for token in ACTION_TOKENS)
-    expected = " ".join(INTENT_TOKENS.get(intent, []))
-    return bool(expected) and response.startswith(expected)
+    # Whitespace-insensitive: the BPE decode emits "<hiss><stare>" while the
+    # dataset labels read "<hiss> <stare>". Compare token sequences, not strings.
+    expected = "".join(INTENT_TOKENS.get(intent, []))
+    return bool(expected) and response.replace(" ", "").startswith(expected)
 
 
 def evaluate(model_dir, heldout_path, limit=0, log=print) -> dict:
@@ -79,9 +81,25 @@ def evaluate(model_dir, heldout_path, limit=0, log=print) -> dict:
         log(f"  {intent}: {correct}/{total} = {correct / total:.1%}")
     log(f"  OVERALL: {total_correct}/{len(rows)} = {total_correct / len(rows):.1%}")
 
-    neutral_total = sum(per_intent_total[i] for i in NEUTRAL_INTENTS if i in per_intent_total)
-    log(f"[purity] action-token leakage on neutral/negatives: "
-        f"{leakage_rows}/{neutral_total} (target 0)")
+    # Purity battery: neutral/negatives have no held-out synsets, so score
+    # leakage on a seeded sample of their TRAIN-split rows (target: 0 leaks).
+    import random
+
+    train_rows = [
+        row
+        for row in load_rows(Path(heldout_path).with_name("train.jsonl"))
+        if row["intent"] in NEUTRAL_INTENTS
+    ]
+    rng = random.Random(20261001)
+    rng.shuffle(train_rows)
+    purity_sample = train_rows[:200]
+    purity_leaks = sum(
+        1
+        for row in purity_sample
+        if any(token in neural_v6.seeded_generate(row["prompt"], engine) for token in ACTION_TOKENS)
+    )
+    log(f"[purity] action-token leakage on {len(purity_sample)} train-split "
+        f"neutral/negatives: {purity_leaks}/{len(purity_sample)} (target 0)")
 
     determinism_prompts = [row["prompt"] for row in rows[:DETERMINISM_PROMPTS]]
     mismatches = 0
@@ -99,7 +117,7 @@ def evaluate(model_dir, heldout_path, limit=0, log=print) -> dict:
             intent: per_intent_correct[intent] / per_intent_total[intent]
             for intent in per_intent_total
         },
-        "leakage": leakage_rows / neutral_total if neutral_total else 0.0,
+        "leakage": purity_leaks / len(purity_sample) if purity_sample else 0.0,
         "determinism_mismatches": mismatches,
     }
 

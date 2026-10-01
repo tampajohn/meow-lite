@@ -167,3 +167,29 @@ determinism; it prints a report table and exits nonzero on any failure:
 ```bash
 /opt/homebrew/bin/uv run python eval.py
 ```
+
+## v6: Server-Silent Comprehension (EXPERIMENTAL)
+
+v6 flips the architecture: a from-scratch 8M-param GPT-2 trained on a
+teacher-woven dataset reads the prompt itself, and the regex/behavior layer
+is removed from its path entirely. The server routes between engines via
+`MEOW_LITE_ENGINE`:
+
+- `v4` (default): the current behavior — regex triggers + weave, exactly as
+  documented above.
+- `v6`: the model does comprehension in the weights. The server calls the
+  model directly (`neural_v6.seeded_generate`); no `apply_triggers`, no
+  `weave`, no reward warming. A cat-mask logits processor makes English
+  leakage impossible by construction. If the checkpoint fails to load, the
+  server logs a warning and falls back to v4 behavior.
+
+```bash
+MEOW_LITE_ENGINE=v6 /opt/homebrew/bin/uv run uvicorn meow_lite.server:app --port 8011
+curl http://localhost:8011/health   # -> {"status": "ok", "engine": "v6"}
+```
+
+**Current gate status: experimental — not the default for a reason.**
+Held-out synonym accuracy: **65%** (gate: >=90%). Neutral/negatives purity:
+**41% action-token leakage** (gate: 0%). The v4 fallback remains the default
+until both gates pass; the v6 checkpoint ships at
+`models/meow-lite-v6-balanced/` for eval and development only.
