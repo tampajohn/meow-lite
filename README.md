@@ -168,28 +168,36 @@ determinism; it prints a report table and exits nonzero on any failure:
 /opt/homebrew/bin/uv run python eval.py
 ```
 
-## v6: Server-Silent Comprehension (EXPERIMENTAL)
+## v5/v6: Two Cats (opt-in neural engines)
 
-v6 flips the architecture: a from-scratch 8M-param GPT-2 trained on a
-teacher-woven dataset reads the prompt itself, and the regex/behavior layer
-is removed from its path entirely. The server routes between engines via
-`MEOW_LITE_ENGINE`:
+v5/v6 flip the architecture: a from-scratch 6.8M-param GPT-2 trained on a
+teacher-woven dataset reads the prompt itself, and the regex/behavior layer is
+removed from its path entirely. The server ships them as two temperaments,
+selected via `MEOW_LITE_ENGINE`:
 
-- `v4` (default): the current behavior — regex triggers + weave, exactly as
-  documented above.
-- `v6`: the model does comprehension in the weights. The server calls the
-  model directly (`neural_v6.seeded_generate`); no `apply_triggers`, no
-  `weave`, no reward warming. A cat-mask logits processor makes English
-  leakage impossible by construction. If the checkpoint fails to load, the
-  server logs a warning and falls back to v4 behavior.
+| Engine | Temperament | Checkpoint | Size | Held-out accuracy | Fresh-neutral leak |
+|---|---|---|---|---|---|
+| `v4` (default) | the classic 104K shim | `models/meow-lite` | 104K | 100% (regex) | 0% |
+| `v5` | chaotic cat | `models/meow-lite-v5` | 6.8M | 73.7% | 15% |
+| `v6` | calmer cat | `models/meow-lite-v6` | 6.8M | 70.4% | 3% |
+
+v5 comprehends more and interrupts more; v6 comprehends slightly less and
+minds its manners. Pick your poison.
+
+In both v5 and v6 the server is silent plumbing: the model's response is used
+directly (`neural_v6.seeded_generate`) — no `apply_triggers`, no `weave`, no
+reward warming. The **CatMask logits processor** guarantees the output can
+only ever be cat: after the prompt separator, every non-cat token is masked
+to -inf, so English leakage is impossible by construction. If a checkpoint
+fails to load, the server logs a warning and falls back to v4 behavior.
 
 ```bash
-MEOW_LITE_ENGINE=v6 /opt/homebrew/bin/uv run uvicorn meow_lite.server:app --port 8011
-curl http://localhost:8011/health   # -> {"status": "ok", "engine": "v6"}
+MEOW_LITE_ENGINE=v5 /opt/homebrew/bin/uv run uvicorn meow_lite.server:app --port 8011
+curl http://localhost:8011/health   # -> {"status": "ok", "engine": "v5"}
+
+MEOW_LITE_ENGINE=v6 /opt/homebrew/bin/uv run python -c "1" # same, calmer cat
 ```
 
-**Current gate status: experimental — not the default for a reason.**
-Held-out synonym accuracy: **65%** (gate: >=90%). Neutral/negatives purity:
-**41% action-token leakage** (gate: 0%). The v4 fallback remains the default
-until both gates pass; the v6 checkpoint ships at
-`models/meow-lite-v6-balanced/` for eval and development only.
+Neither neural engine is the default yet: held-out synonym accuracy still
+sits below the >=90% comprehension gate, and only v6's 3% leak approaches the
+0% purity gate. v4 remains the default until both cats pass.

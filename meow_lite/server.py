@@ -16,7 +16,13 @@ from meow_lite.behavior import apply_triggers, is_reward, weave
 from meow_lite.meow import MeowGenerator
 
 MODEL_ID = "meow-lite"
-V6_MODEL_DIR = str(Path(__file__).resolve().parent.parent / "models" / "meow-lite-v6-balanced")
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+# Two-temperament ship: v5 = chaotic cat, v6 = calmer cat. Both run the
+# server-silent neural path (specs/v6.md); v4 stays the default.
+NEURAL_ENGINE_DIRS = {
+    "v5": str(_REPO_ROOT / "models" / "meow-lite-v5"),
+    "v6": str(_REPO_ROOT / "models" / "meow-lite-v6"),
+}
 
 logger = logging.getLogger("meow_lite.server")
 
@@ -24,20 +30,26 @@ app = FastAPI(title="meow-lite", version="1.0.0")
 _generator = MeowGenerator()
 _engine: Optional[dict] = None
 _engine_checked = False
-# v6 engine (specs/v6.md rollout): selected via MEOW_LITE_ENGINE, default v4.
+# Engine selection via MEOW_LITE_ENGINE: v4 (default) | v5 | v6.
 _engine_name: str = os.environ.get("MEOW_LITE_ENGINE", "v4")
-_v6_engine: Optional[dict] = None
-_v6_checked = False
+if _engine_name not in ("v4", *NEURAL_ENGINE_DIRS):
+    logger.warning("unknown MEOW_LITE_ENGINE=%r; falling back to v4", _engine_name)
+    _engine_name = "v4"
+_neural_engines: dict[str, Optional[dict]] = {}
+_neural_checked: set[str] = set()
 
 
 def reset_engine() -> None:
     """Forget loaded models and re-read the engine env (test/startup boundary)."""
-    global _engine, _engine_checked, _engine_name, _v6_engine, _v6_checked
+    global _engine, _engine_checked, _engine_name
     _engine = None
     _engine_checked = False
     _engine_name = os.environ.get("MEOW_LITE_ENGINE", "v4")
-    _v6_engine = None
-    _v6_checked = False
+    if _engine_name not in ("v4", *NEURAL_ENGINE_DIRS):
+        logger.warning("unknown MEOW_LITE_ENGINE=%r; falling back to v4", _engine_name)
+        _engine_name = "v4"
+    _neural_engines.clear()
+    _neural_checked.clear()
 
 
 def _get_engine() -> Optional[dict]:
@@ -48,18 +60,19 @@ def _get_engine() -> Optional[dict]:
     return _engine
 
 
-def _get_v6_engine() -> Optional[dict]:
-    global _v6_engine, _v6_checked
-    if not _v6_checked:
-        _v6_checked = True
-        _v6_engine = neural_v6.load(V6_MODEL_DIR)
-        if _v6_engine is None:
+def _get_neural_engine(name: str) -> Optional[dict]:
+    """Load the named neural checkpoint once; None + warning on failure."""
+    if name not in _neural_checked:
+        _neural_checked.add(name)
+        _neural_engines[name] = neural_v6.load(NEURAL_ENGINE_DIRS[name])
+        if _neural_engines[name] is None:
             logger.warning(
-                "MEOW_LITE_ENGINE=v6 but the checkpoint at %s failed to load; "
+                "MEOW_LITE_ENGINE=%s but the checkpoint at %s failed to load; "
                 "falling back to v4 behavior",
-                V6_MODEL_DIR,
+                name,
+                NEURAL_ENGINE_DIRS[name],
             )
-    return _v6_engine
+    return _neural_engines[name]
 
 
 def _generate(prompt: str, warm: bool = False) -> str:
@@ -74,14 +87,14 @@ def _generate(prompt: str, warm: bool = False) -> str:
 def _compose(prompt: str) -> str:
     """Generated meows with forced behavior tokens woven in front.
 
-    v6 engine (server-silent comprehension): the model's response is used
+    v5/v6 engines (server-silent comprehension): the model's response is used
     DIRECTLY — no behavior.py weave, no regex triggers, no reward warming.
-    If the v6 checkpoint fails to load, falls back to the v4 behavior path.
+    If the checkpoint fails to load, falls back to the v4 behavior path.
     """
-    if _engine_name == "v6":
-        v6 = _get_v6_engine()
-        if v6 is not None:
-            return neural_v6.seeded_generate(prompt, v6)
+    if _engine_name in NEURAL_ENGINE_DIRS:
+        neural_engine = _get_neural_engine(_engine_name)
+        if neural_engine is not None:
+            return neural_v6.seeded_generate(prompt, neural_engine)
 
     warm = is_reward(prompt)
     text = weave(apply_triggers(prompt), _generate(prompt, warm=warm))
